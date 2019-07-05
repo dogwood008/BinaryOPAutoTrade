@@ -1,0 +1,2 @@
+# BinaryOPAutoTrade
+バイナリオプションを自動で取引するやつ
