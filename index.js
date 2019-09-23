@@ -1,7 +1,6 @@
 const fs = require('fs');
 const StateMachine = require('javascript-state-machine');
 const puppeteer = require('puppeteer');
-//import SerialNumber from './serialNumber';
 
 const COOKIES_PATH = './cookies.json';
 const USER_ID = process.env.USER_ID;
@@ -13,12 +12,12 @@ const TRADE_MAIN_URL = 'https://opt.yjfx.jp/boctradeweb/';
 const seconds = (s) => 1000 * s;
 // zip: https://qiita.com/QUANON/items/c1cf22fda7c7813cc962
 const zip = (array1, array2) => array1.map((_, i) => [array1[i], array2[i]]);
-const pageStates = new StateMachine({
+const pageState = new StateMachine({
   init: 'blank',
   transitions: [
-    { name: 'blank', to: 'login' },
-    { name: 'login', from: 'blank', to: 'trade' },
-    { name: 'trade', from: 'login' }
+    { name: 'login', from: 'blank', to: 'login' },
+    { name: 'trade', from: 'login', to: 'trade' },
+    { name: 'finish', from: 'trade' }
   ]
 });
 ///////// /utils ////////
@@ -89,7 +88,6 @@ const targetPrices = async (page) => {
   const lowPrices = await page.$$eval(lowPricesSelector, list => {
     return list.map(e => e.textContent);
   });
-  debugger;
   const highPrices = await page.$$eval(highPricesSelector, list => {
     return list.map(e => e.textContent);
   });
@@ -109,6 +107,7 @@ const _setUnitRate = async (rate, highOrLow, page) => {
   if (!(pageState.is('trade'))) { throw new Error('Invalid State'); }
   console.debug(await targetRates(page));
   const nthChild = (await targetRates(page)).indexOf(rate);
+  if (nthChild === -1) { throw new Error(`Invalid rate: ${rate}`) };
   const buttonSelector = `#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr:nth-child(${nthChild}) > td.ticket_size.${highOrLow}.active > div.new_order.changeable_on_click_style > div.amount_wrapper`;
   await page.waitForSelector(buttonSelector, {timeout: seconds(3), visible: true});
   await page.click(buttonSelector);
@@ -126,12 +125,41 @@ const _setLots = async (lots, page) => {
   }
 }
 
+const _checkSkipConfirmation = async (page) => {
+  const checkboxSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.suppress_confirm > label > input';
+  await page.waitForSelector(checkboxSelector, {timeout: seconds(3), visible: true});
+  // https://checklyhq.com/docs/browser-checks/scraping-onpage-elements/
+  const isChecked = await page.$eval(checkboxSelector, input => input.checked);
+  if (!isChecked) {
+    await page.click(checkboxSelector);
+  }
+}
+
+const _clickBuyButton = async (page) => {
+  const buttonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.order_button > button';
+  await page.waitForSelector(buttonSelector, {timeout: seconds(3), visible: true});
+  await page.click(buttonSelector);
+}
+
+// returns: null => succeeded, str => error
 const buyAnOption = async (rate, highOrLow, lots, page) => {
   await _setUnitRate(rate, highOrLow, page);
   await _setLots(lots, page);
+  await _checkSkipConfirmation(page);
+  await _clickBuyButton(page);
+  const errorDialogSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error';
+  await page.waitFor(seconds(3));
+  // https://github.com/GoogleChrome/puppeteer/issues/1149#issuecomment-339020744
+  const isError = await page.$(errorDialogSelector) !== null;
+  if (isError) {
+    const messageSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error > div.dialog_box.ui-dialog-content.ui-widget-content';
+    const message = await page.$eval(messageSelector, e => e.textContent);
+    return message;
+  }
+  return null;
 }
 
-(async () => {
+const main = async () => {
   const browser = await puppeteer.launch({headless: false, args: ['--window-size=1600,950']});
   const page = await browser.newPage();
   await skipTutorial(page);
@@ -144,9 +172,18 @@ const buyAnOption = async (rate, highOrLow, lots, page) => {
   const targets = await targetRatesPrices(page);
   console.debug(targets);
 
-  buyAnOption('107.325', 'high', 3, page);
+  const result = await buyAnOption('107.457', 'high', 3, page);
+  console.debug(result);
 
   console.debug('finished');
   //await page.screenshot({path: 'example.png'});
   //await browser.close();
+};
+
+(async () => {
+  try {
+  await main()
+  } catch (e) {
+    console.error(e);
+  }
 })();
