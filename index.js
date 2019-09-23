@@ -114,6 +114,7 @@ const _setUnitRate = async (rate, highOrLow, page) => {
 }
 
 const _setLots = async (lots, page) => {
+  if (!(pageState.is('trade'))) { throw new Error('Invalid State'); }
   const addButtonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.input_lot > button.button.plus_button.changeable_on_click_style';
   const lotsSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.input_lot > span';
   for (let i = 0; i < FAIL_SAFE_MAX_LOTS; i++) {
@@ -126,6 +127,7 @@ const _setLots = async (lots, page) => {
 }
 
 const _checkSkipConfirmation = async (page) => {
+  if (!(pageState.is('trade'))) { throw new Error('Invalid State'); }
   const checkboxSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.suppress_confirm > label > input';
   await page.waitForSelector(checkboxSelector, {timeout: seconds(3), visible: true});
   // https://checklyhq.com/docs/browser-checks/scraping-onpage-elements/
@@ -136,6 +138,7 @@ const _checkSkipConfirmation = async (page) => {
 }
 
 const _clickBuyButton = async (page) => {
+  if (!(pageState.is('trade'))) { throw new Error('Invalid State'); }
   const buttonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.order_button > button';
   await page.waitForSelector(buttonSelector, {timeout: seconds(3), visible: true});
   await page.click(buttonSelector);
@@ -143,6 +146,7 @@ const _clickBuyButton = async (page) => {
 
 // returns: null => succeeded, str => error
 const buyAnOption = async (rate, highOrLow, lots, page) => {
+  if (!(pageState.is('trade'))) { throw new Error('Invalid State'); }
   await _setUnitRate(rate, highOrLow, page);
   await _setLots(lots, page);
   await _checkSkipConfirmation(page);
