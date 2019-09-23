@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/dogwood008/BinaryOPAutoTrade#readme",
   "dependencies": {
+    "javascript-state-machine": "^3.1.0",
     "puppeteer": "^1.18.1"
   }
 }
