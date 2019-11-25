@@ -2,8 +2,12 @@ const fs = require('fs');
 const StateMachine = require('javascript-state-machine');
 const puppeteer = require('puppeteer');
 
+// https://qiita.com/elzup/items/42867f13a6f1c457dc6d
+const pp = v => console.dir(v, { depth: null, colors: true});
+
 const COOKIES_PATH = './cookies.json';
 const FAIL_SAFE_MAX_LOTS = parseInt(process.env.FAIL_SAFE_MAX_LOTS) || 10;
+const HOME_URL = 'https://opt.yjfx.jp/';  // to set LocalStorage
 const TRADE_MAIN_URL = 'https://opt.yjfx.jp/boctradeweb/';
 
 class Browser {
@@ -31,12 +35,44 @@ class Browser {
   async skipTutorial() {
     // TODO: チュートリアルをスキップできないので、
     // ダイアログを閉じられないか再試行
+    // https://stackoverflow.com/questions/51789038/set-localstorage-items-before-page-loads-in-puppeteer
     console.debug('skipTutorial');
-    await this.page.evaluate(() => {
+    const page = await this.browser.newPage();
+    /*
+    await page.setRequestInterception(true);
+    await page.on('request', r => {
+      r.respond({
+        status: 200,
+        contentType: 'text/plain',
+        body: 'tweak me.',
+      });
+    });
+    */
+    await page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
+    //await page.goto(HOME_URL, {waitUntil: 'domcontentloaded'});
+    const test = await page.evaluate(async () => {
       const key = 'after_first_tutorial';
       const value = '{value: "true", expires: "Thu, 30 Jan 2037 05:15:27 GMT"}';
-      localStorage.setItem(key, value);
+      await localStorage.setItem(key, value);
+      console.log('------------');
+      return localStorage.getItem(key);
     });
+    debugger;
+    console.log(test);
+    console.log('aaaaaaaaaaaaaa')
+    /*
+    const p = await this.browser.newPage()
+    await page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
+    await p.evaluate(() => {
+      const key = 'after_first_tutorial';
+      const value = '{value: "true", expires: "Thu, 30 Jan 2037 05:15:27 GMT"}';
+      console.log('----------------------------');
+      console.log(localStorage.getItem('after_first_tutorial'));
+      console.log('----------------------------');
+    });
+    await p.close();
+    */
+    await page.close();
   }
 
   async login(userId, password) {
@@ -48,8 +84,12 @@ class Browser {
     }
     this.PAGE_STATE.login();
     console.debug('login');
+    // console.debug('skipTutorial start');
+    // await this.skipTutorial();
+    // console.debug('skipTutorial end');
+    this.page = await this.browser.newPage();
+    debugger;
     await this.page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
-    await this.skipTutorial();
     const idInputTextSelecter = '#loginForm input[name=loginId]';
     const pwInputTextSelecter = '#loginForm input[name=password]';
     const loginBtnSelecter = '#loginForm input[class=button]';
@@ -59,6 +99,10 @@ class Browser {
     await this.page.type(pwInputTextSelecter, password);
     this.page.click(loginBtnSelecter);
     this.PAGE_STATE.trade();
+  }
+
+  async stopTutorial() {
+    await this.page.evaluate(() => stopTutorial());
   }
 
   async selectCurrencyPair(pair, page) {
@@ -111,20 +155,32 @@ class Browser {
     return this.zip(lowPrices, highPrices);
   }
 
+  /*
+   * 現在のオプション売買価を得る。
+   */
   async targetRatesPrices(page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
     const rates = await this.targetRates(this.page);
-    const prices = await this.targetPrices(this.page);
-    const targets = this.zip(rates, prices);
+    const prices = await this.targetPrices(this.page)
+    const pairs = ((rates, pricesArr) => {
+      return this.zip(rates, pricesArr).map((r) => {
+        const pair = { low: parseInt(r[1][0]), high: parseInt(r[1][1]) };
+        console.log(r); return { [r[0]]: pair }
+      });
+    })(rates, prices);
+    const targets = {
+      rates: rates,
+      prices: pairs
+    };
     return targets;
   }
 
   async _setUnitRate(rate, highOrLow, page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
     console.debug(await this.targetRates(this.page));
-    const nthChild = (await this.targetRates(this.page)).indexOf(rate);
-    if (nthChild === -1) { throw new Error(`Invalid rate: ${rate}`) };
-    const buttonSelector = `#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr:nth-child(${nthChild}) > td.ticket_size.${highOrLow}.active > div.new_order.changeable_on_click_style > div.amount_wrapper`;
+    const nthChild = (await this.targetRates(this.page)).indexOf(rate) + 1;
+    if (nthChild <= 0) { throw new Error(`Invalid rate: ${rate}`) };
+    const buttonSelector = `#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr:nth-child(${nthChild}) > td.ticket_size.${highOrLow} > div.new_order.changeable_on_click_style > div.amount_wrapper`;
     await this.page.waitForSelector(buttonSelector, {timeout: this.seconds(3), visible: true});
     await this.page.click(buttonSelector);
   }
@@ -174,9 +230,12 @@ class Browser {
     if (isError) {
       const messageSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error > div.dialog_box.ui-dialog-content.ui-widget-content';
       const message = await this.page.$eval(messageSelector, e => e.textContent);
-      return message;
+      const okBtnSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error.ui-draggable.ui-resizable > div.ui-dialog-buttonpane.ui-widget-content.ui-helper-clearfix > div > button';
+      await this.page.waitForSelector(okBtnSelector, {timeout: this.seconds(3), visible: true});
+      await this.page.click(okBtnSelector);
+      return { status: 'failed', message: message };
     }
-    return null;
+    return { rate: rate, highOrLow: highOrLow, lots: lots };
   }
 
   async launch(options={}) {
@@ -201,7 +260,7 @@ const main = async () => {
   const password = process.env.PASSWORD;
   const b = new Browser(userId, password);
 
-  await b.launch();
+  await b.launch({headless: false});
   await b.login(userId, password);
 
   await b.selectCurrencyPair('usdjpy')
@@ -209,7 +268,7 @@ const main = async () => {
   console.debug(await b.endTime());
 
   const targets = await b.targetRatesPrices();
-  console.debug(targets);
+  pp(targets);
 
   const result = await b.buyAnOption('109.039', 'high', 3);
   console.debug(result);

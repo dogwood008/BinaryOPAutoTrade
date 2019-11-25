@@ -7,7 +7,11 @@ const DEBUG = true;
 const http = require('http');
 const config = require('./config');
 const server = http.createServer();
+const querystring = require("querystring");
+const StringDecoder = require('string_decoder').StringDecoder;
+const decoder = new StringDecoder('utf8');
 const Browser = require('./browser');
+
 
 const userId = process.env.USER_ID;
 const password = process.env.PASSWORD;
@@ -19,8 +23,8 @@ const response = (res, data) => {
   res.end();
 };
 
-const routing = async (url, res) => {
-  switch (url) {
+const routing = async (path, res, params) => {
+  switch (path) {
     case '/init':
       const useDisplay = !!process.env.DISPLAY_AVAILABLE;
       const chromiumPath =
@@ -34,6 +38,7 @@ const routing = async (url, res) => {
       await browser.login(userId, password);
 
       await browser.selectCurrencyPair('usdjpy')
+      await browser.stopTutorial();
 
       console.debug(await browser.endTime());
 
@@ -49,22 +54,35 @@ const routing = async (url, res) => {
       break;
 
     case '/buy':
-      const result = await browser.buyAnOption('109.039', 'high', 3);
+      console.debug([params.get('rate'), params.get('high_low'), params.get('lots')]);
+      const rate = params.get('rate');
+      const highLow = params.get('high_low') || 'high';
+      const lots = parseInt(params.get('lots'));
+      //const nthChild = prices.rates.indexOf(rate);
+      const result = await browser.buyAnOption(rate, highLow, lots);
       console.debug(result);
 
       console.debug('finished');
-      res.end();
+      response(res, Object.assign({status: 'succeeded'}, result));
       break;
     case '/finish':
       await browser.close();
       res.end();
+      break;
+    default:
+      response(res, {status: 'failed', message: `Invalid path given: ${path}`});
   }
 };
 
 server.on('request', (req, res) => {
   (async (url) => {
     try {
-      await routing(url, res)
+      let k, v;
+      const urlobj = new URL(`http://example.com${req.url}`); // TODO: ugly
+      const params = urlobj.searchParams;
+      console.debug(params.toString());
+      const path = urlobj.pathname;
+      await routing(path, res, params);
     } catch (e) {
       console.error(e);
       console.error('---------');
