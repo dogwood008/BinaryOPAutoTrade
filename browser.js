@@ -102,7 +102,6 @@ class Browser {
   }
 
   async stopTutorial() {
-    await this.page.evaluate(() => stopTutorial());
   }
 
   async selectCurrencyPair(pair, page) {
@@ -140,6 +139,7 @@ class Browser {
 
   async targetPrices(page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
+    await this.page.evaluate(() => stopTutorial());
     const lowPricesSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr > td.ticket_size.low > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     const highPricesSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr > td.ticket_size.high > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     await this.page.waitForSelector([lowPricesSelector, highPricesSelector],
@@ -164,7 +164,7 @@ class Browser {
     const prices = await this.targetPrices(this.page)
     const pairs = ((rates, pricesArr) => {
       return this.zip(rates, pricesArr).map((r) => {
-        const pair = { low: parseInt(r[1][0]), high: parseInt(r[1][1]) };
+        const pair = { low: parseInt(r[1][0].replace(',', '')), high: parseInt(r[1][1].replace(',', '')) };
         console.log(r); return { [r[0]]: pair }
       });
     })(rates, prices);
@@ -231,7 +231,6 @@ class Browser {
       const messageSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error > div.dialog_box.ui-dialog-content.ui-widget-content';
       const message = await this.page.$eval(messageSelector, e => e.textContent);
       const okBtnSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error.ui-draggable.ui-resizable > div.ui-dialog-buttonpane.ui-widget-content.ui-helper-clearfix > div > button';
-      await this.page.waitForSelector(okBtnSelector, {timeout: this.seconds(3), visible: true});
       await this.page.click(okBtnSelector);
       return { status: 'failed', message: message };
     }
