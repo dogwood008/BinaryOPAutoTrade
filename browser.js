@@ -216,12 +216,28 @@ class Browser {
     await this.page.click(buttonSelector);
   }
 
+  async _rightNowPrice(page) {
+    const priceSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.trade_amount > span.amount';
+    await this.page.waitForSelector(priceSelector, {timeout: this.seconds(3), visible: true});
+    const price = (await this.page.$eval(priceSelector, item => {
+      return item.textContent;
+    })).replace(',', '');
+    return parseInt(price);
+  }
+
   // returns: null => succeeded, str => error
   async buyAnOption(rate, highOrLow, lots, page){
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
     await this._setUnitRate(rate, highOrLow, this.page);
     await this._setLots(lots, this.page);
     await this._checkSkipConfirmation(this.page);
+
+    const rightNowPrice = await this._rightNowPrice(page);
+    console.debug(`rightNowPrice: ${rightNowPrice}`);
+    if (rightNowPrice === 1000 || rightNowPrice === 0) {
+      return { status: 'failed', message: `The rate is ${rightNowPrice}, this is no rationality.` };
+    }
+
     await this._clickBuyButton(this.page);
     const errorDialogSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error';
     await this.page.waitFor(this.seconds(3));
