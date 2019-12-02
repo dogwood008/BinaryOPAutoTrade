@@ -38,9 +38,9 @@ const routing = async (path, res, params) => {
       await browser.login(userId, password);
 
       await browser.selectCurrencyPair('usdjpy')
-      await browser.stopTutorial();
 
-      console.debug(await browser.endTime());
+      const endTime = await browser.endTime();
+      console.debug(`This wave ends at ${endTime[0]}:${endTime[1]}`);
 
       const targets = await browser.targetRatesPrices();
       console.debug(targets);

@@ -32,49 +32,6 @@ class Browser {
     });
   }
 
-  async skipTutorial() {
-    // TODO: チュートリアルをスキップできないので、
-    // ダイアログを閉じられないか再試行
-    // https://stackoverflow.com/questions/51789038/set-localstorage-items-before-page-loads-in-puppeteer
-    console.debug('skipTutorial');
-    const page = await this.browser.newPage();
-    /*
-    await page.setRequestInterception(true);
-    await page.on('request', r => {
-      r.respond({
-        status: 200,
-        contentType: 'text/plain',
-        body: 'tweak me.',
-      });
-    });
-    */
-    await page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
-    //await page.goto(HOME_URL, {waitUntil: 'domcontentloaded'});
-    const test = await page.evaluate(async () => {
-      const key = 'after_first_tutorial';
-      const value = '{value: "true", expires: "Thu, 30 Jan 2037 05:15:27 GMT"}';
-      await localStorage.setItem(key, value);
-      console.log('------------');
-      return localStorage.getItem(key);
-    });
-    debugger;
-    console.log(test);
-    console.log('aaaaaaaaaaaaaa')
-    /*
-    const p = await this.browser.newPage()
-    await page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
-    await p.evaluate(() => {
-      const key = 'after_first_tutorial';
-      const value = '{value: "true", expires: "Thu, 30 Jan 2037 05:15:27 GMT"}';
-      console.log('----------------------------');
-      console.log(localStorage.getItem('after_first_tutorial'));
-      console.log('----------------------------');
-    });
-    await p.close();
-    */
-    await page.close();
-  }
-
   async login(userId, password) {
     if (typeof userId === 'undefined' || userId === null) {
       throw new Error(`Invalid userId given: ${userId}`);
@@ -84,9 +41,6 @@ class Browser {
     }
     this.PAGE_STATE.login();
     console.debug('login');
-    // console.debug('skipTutorial start');
-    // await this.skipTutorial();
-    // console.debug('skipTutorial end');
     this.page = await this.browser.newPage();
     debugger;
     await this.page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
@@ -99,9 +53,6 @@ class Browser {
     await this.page.type(pwInputTextSelecter, password);
     this.page.click(loginBtnSelecter);
     this.PAGE_STATE.trade();
-  }
-
-  async stopTutorial() {
   }
 
   async selectCurrencyPair(pair, page) {
