@@ -88,9 +88,14 @@ class Browser {
     return prices;
   }
 
+  async _skipTutorial(page) {
+    // Call a js method implemented on website
+    await this.page.evaluate(() => stopTutorial());
+  }
+
   async targetPrices(page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
-    await this.page.evaluate(() => stopTutorial());
+    await this._skipTutorial();
     const lowPricesSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr > td.ticket_size.low > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     const highPricesSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr > td.ticket_size.high > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     await this.page.waitForSelector([lowPricesSelector, highPricesSelector],
@@ -136,8 +141,15 @@ class Browser {
     await this.page.click(buttonSelector);
   }
 
+  async _clickClearButton(page) {
+    const clearButtonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.lot_buttons > button.button.clear_button.changeable_on_click_style';
+    await this.page.waitForSelector(clearButtonSelector, {timeout: this.seconds(3), visible: true});
+    await this.page.click(clearButtonSelector);
+  }
+
   async _setLots (lots, page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
+    await this._clickClearButton(this.page);
     const addButtonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.input_lot > button.button.plus_button.changeable_on_click_style';
     const lotsSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.input_lot > span';
     for (let i = 0; i < FAIL_SAFE_MAX_LOTS; i++) {
@@ -167,8 +179,9 @@ class Browser {
     await this.page.click(buttonSelector);
   }
 
-  async _rightNowPrice(page) {
-    const priceSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.trade_amount > span.amount';
+  async _selectedNowPrice(page) {
+    // Please call after rate selected.
+    const priceSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr.option_box.selected > td.ticket_size.selected > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     await this.page.waitForSelector(priceSelector, {timeout: this.seconds(3), visible: true});
     const price = (await this.page.$eval(priceSelector, item => {
       return item.textContent;
@@ -183,7 +196,7 @@ class Browser {
     await this._setLots(lots, this.page);
     await this._checkSkipConfirmation(this.page);
 
-    const rightNowPrice = await this._rightNowPrice(page);
+    const rightNowPrice = await this._selectedNowPrice(page);
     console.debug(`rightNowPrice: ${rightNowPrice}`);
     if (rightNowPrice === 1000 || rightNowPrice === 0) {
       return { status: 'failed', message: `The rate is ${rightNowPrice}, this is no rationality.` };
