@@ -2,8 +2,12 @@ const fs = require('fs');
 const StateMachine = require('javascript-state-machine');
 const puppeteer = require('puppeteer');
 
+// https://qiita.com/elzup/items/42867f13a6f1c457dc6d
+const pp = v => console.dir(v, { depth: null, colors: true});
+
 const COOKIES_PATH = './cookies.json';
 const FAIL_SAFE_MAX_LOTS = parseInt(process.env.FAIL_SAFE_MAX_LOTS) || 10;
+const HOME_URL = 'https://opt.yjfx.jp/';  // to set LocalStorage
 const TRADE_MAIN_URL = 'https://opt.yjfx.jp/boctradeweb/';
 
 class Browser {
@@ -28,17 +32,6 @@ class Browser {
     });
   }
 
-  async skipTutorial() {
-    // TODO: チュートリアルをスキップできないので、
-    // ダイアログを閉じられないか再試行
-    console.debug('skipTutorial');
-    await this.page.evaluate(() => {
-      const key = 'after_first_tutorial';
-      const value = '{value: "true", expires: "Thu, 30 Jan 2037 05:15:27 GMT"}';
-      localStorage.setItem(key, value);
-    });
-  }
-
   async login(userId, password) {
     if (typeof userId === 'undefined' || userId === null) {
       throw new Error(`Invalid userId given: ${userId}`);
@@ -48,8 +41,9 @@ class Browser {
     }
     this.PAGE_STATE.login();
     console.debug('login');
+    this.page = await this.browser.newPage();
+    debugger;
     await this.page.goto(TRADE_MAIN_URL, {waitUntil: 'domcontentloaded'});
-    await this.skipTutorial();
     const idInputTextSelecter = '#loginForm input[name=loginId]';
     const pwInputTextSelecter = '#loginForm input[name=password]';
     const loginBtnSelecter = '#loginForm input[class=button]';
@@ -94,8 +88,14 @@ class Browser {
     return prices;
   }
 
+  async _skipTutorial(page) {
+    // Call a js method implemented on website
+    await this.page.evaluate(() => stopTutorial());
+  }
+
   async targetPrices(page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
+    await this._skipTutorial();
     const lowPricesSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr > td.ticket_size.low > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     const highPricesSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr > td.ticket_size.high > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
     await this.page.waitForSelector([lowPricesSelector, highPricesSelector],
@@ -111,26 +111,45 @@ class Browser {
     return this.zip(lowPrices, highPrices);
   }
 
+  /*
+   * 現在のオプション売買価を得る。
+   */
   async targetRatesPrices(page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
     const rates = await this.targetRates(this.page);
-    const prices = await this.targetPrices(this.page);
-    const targets = this.zip(rates, prices);
+    const prices = await this.targetPrices(this.page)
+    const pairs = ((rates, pricesArr) => {
+      return this.zip(rates, pricesArr).map((r) => {
+        const pair = { low: parseInt(r[1][0].replace(',', '')), high: parseInt(r[1][1].replace(',', '')) };
+        console.log(r); return { [r[0]]: pair }
+      });
+    })(rates, prices);
+    const targets = {
+      rates: rates,
+      prices: pairs
+    };
     return targets;
   }
 
   async _setUnitRate(rate, highOrLow, page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
     console.debug(await this.targetRates(this.page));
-    const nthChild = (await this.targetRates(this.page)).indexOf(rate);
-    if (nthChild === -1) { throw new Error(`Invalid rate: ${rate}`) };
-    const buttonSelector = `#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr:nth-child(${nthChild}) > td.ticket_size.${highOrLow}.active > div.new_order.changeable_on_click_style > div.amount_wrapper`;
+    const nthChild = (await this.targetRates(this.page)).indexOf(rate) + 1;
+    if (nthChild <= 0) { throw new Error(`Invalid rate: ${rate}`) };
+    const buttonSelector = `#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr:nth-child(${nthChild}) > td.ticket_size.${highOrLow} > div.new_order.changeable_on_click_style > div.amount_wrapper`;
     await this.page.waitForSelector(buttonSelector, {timeout: this.seconds(3), visible: true});
     await this.page.click(buttonSelector);
   }
 
+  async _clickClearButton(page) {
+    const clearButtonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.lot_buttons > button.button.clear_button.changeable_on_click_style';
+    await this.page.waitForSelector(clearButtonSelector, {timeout: this.seconds(3), visible: true});
+    await this.page.click(clearButtonSelector);
+  }
+
   async _setLots (lots, page) {
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
+    await this._clickClearButton(this.page);
     const addButtonSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.input_lot > button.button.plus_button.changeable_on_click_style';
     const lotsSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_3 > ul > li.li_body.input_lot > span';
     for (let i = 0; i < FAIL_SAFE_MAX_LOTS; i++) {
@@ -160,12 +179,29 @@ class Browser {
     await this.page.click(buttonSelector);
   }
 
+  async _selectedNowPrice(page) {
+    // Please call after rate selected.
+    const priceSelector = '#content_scroll_wrapper_0 > div > div > div.panel.panel_0_0_2.ladderOrder > div.ladder_order_2.ladder > table > tbody > tr.option_box.selected > td.ticket_size.selected > div.new_order.changeable_on_click_style > div.amount_wrapper > span.amount';
+    await this.page.waitForSelector(priceSelector, {timeout: this.seconds(3), visible: true});
+    const price = (await this.page.$eval(priceSelector, item => {
+      return item.textContent;
+    })).replace(',', '');
+    return parseInt(price);
+  }
+
   // returns: null => succeeded, str => error
   async buyAnOption(rate, highOrLow, lots, page){
     if (!(this.PAGE_STATE.is('trade'))) { throw new Error('Invalid State'); }
     await this._setUnitRate(rate, highOrLow, this.page);
     await this._setLots(lots, this.page);
     await this._checkSkipConfirmation(this.page);
+
+    const rightNowPrice = await this._selectedNowPrice(page);
+    console.debug(`rightNowPrice: ${rightNowPrice}`);
+    if (rightNowPrice === 1000 || rightNowPrice === 0) {
+      return { status: 'failed', message: `The rate is ${rightNowPrice}, this is no rationality.` };
+    }
+
     await this._clickBuyButton(this.page);
     const errorDialogSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error';
     await this.page.waitFor(this.seconds(3));
@@ -174,9 +210,11 @@ class Browser {
     if (isError) {
       const messageSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error > div.dialog_box.ui-dialog-content.ui-widget-content';
       const message = await this.page.$eval(messageSelector, e => e.textContent);
-      return message;
+      const okBtnSelector = 'body > div.ui-dialog.ui-widget.ui-widget-content.ui-corner-all.response_status_error.ui-draggable.ui-resizable > div.ui-dialog-buttonpane.ui-widget-content.ui-helper-clearfix > div > button';
+      await this.page.click(okBtnSelector);
+      return { status: 'failed', message: message };
     }
-    return null;
+    return { rate: rate, highOrLow: highOrLow, lots: lots };
   }
 
   async launch(options={}) {
@@ -201,7 +239,7 @@ const main = async () => {
   const password = process.env.PASSWORD;
   const b = new Browser(userId, password);
 
-  await b.launch();
+  await b.launch({headless: false});
   await b.login(userId, password);
 
   await b.selectCurrencyPair('usdjpy')
@@ -209,7 +247,7 @@ const main = async () => {
   console.debug(await b.endTime());
 
   const targets = await b.targetRatesPrices();
-  console.debug(targets);
+  pp(targets);
 
   const result = await b.buyAnOption('109.039', 'high', 3);
   console.debug(result);
