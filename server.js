@@ -77,7 +77,6 @@ const routing = async (path, res, params) => {
 server.on('request', (req, res) => {
   (async (url) => {
     try {
-      let k, v;
       const urlobj = new URL(`http://example.com${req.url}`); // TODO: ugly
       const params = urlobj.searchParams;
       console.debug(params.toString());
